@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 # # -*- coding: utf-8 -*-
 import sys
 import traceback
@@ -22,7 +22,7 @@ class BasicException(Exception):
 conn = None
 
 parser = argparse.ArgumentParser(description='ZK Basic Reading Tests')
-parser.add_argument('-a', '--address', 
+parser.add_argument('-a', '--address',
                     help='ZK device Address [192.168.1.201]', default='192.168.1.201')
 parser.add_argument('-p', '--port', type=int,
                     help='ZK device port [4370]', default=4370)
@@ -48,6 +48,8 @@ parser.add_argument('-u', '--updatetime', action="store_true",
                     help='Update Date/Time')
 parser.add_argument('-l', '--live-capture', action="store_true",
                     help='Live Event Capture')
+parser.add_argument('-ls', '--live-capture-silent', action="store_true",
+                    help='Silent timeout message for Live Event Capture')
 parser.add_argument('-o', '--open-door', action="store_true",
                     help='Open door')
 parser.add_argument('-D', '--deleteuser', type=int,
@@ -58,6 +60,10 @@ parser.add_argument('-E', '--enrolluser', type=int,
                     help='Enroll a User (uid)', default=0)
 parser.add_argument('-F', '--finger', type=int,
                     help='Finger for enroll (fid=0)', default=0)
+parser.add_argument('-rf', '--records-from',
+                    help='Record from date and time')
+parser.add_argument('-rt', '--records-to',
+                    help='Record to date and time')
 
 args = parser.parse_args()
 
@@ -108,6 +114,7 @@ try:
     max_uid = 0
     prev = None
     if not args.deleteuser:
+        name_users = {}
         for user in users:
             privilege = 'User'
             if user.uid > max_uid:
@@ -119,6 +126,9 @@ try:
             #print ('')
             if args.adduser and user.uid == args.adduser:
                 prev = user
+            # create list of name by user_id
+            name_users[user.user_id] = user.name
+            # end
     if args.deleteuser:
         print ('')
         print ('-- Delete User UID#%s ---' % args.deleteuser)
@@ -225,9 +235,27 @@ try:
         final = time.time()
         print ('    took {:.3f}[s]'.format(final - inicio))
         i = 0
+        if args.records_from:
+            try:
+                records_from = datetime.datetime.strptime(args.records_from, '%Y-%m-%d %H:%M:%S')
+            except ValueError:
+                records_from = None
+        if args.records_to:
+            try:
+                records_to = datetime.datetime.strptime(args.records_to, '%Y-%m-%d %H:%M:%S')
+            except ValueError:
+                records_to = None
         for att in attendance:
             i += 1
-            print ("ATT {:>6}: uid:{:>3}, user_id:{:>8} t: {}, s:{} p:{}".format(i, att.uid, att.user_id, att.timestamp, att.status, att.punch))
+            att_print =True
+            if records_from is not None:
+                if att.timestamp <  records_from:
+                    att_print = False
+            if records_to is not None:
+                if att.timestamp >  records_to:
+                    att_print = False
+            if att_print:
+                print ("ATT {:>6}: uid:{:>3}, user_id:{:>8} t: {}, s:{} p:{} Name: {}".format(i, att.uid, att.user_id, att.timestamp, att.status, att.punch, name_users.get(att.user_id, "---")))
         print ('    took {:.3f}[s]'.format(final - inicio))
     print ('')
     print ('--- sizes & capacity ---')
@@ -240,14 +268,18 @@ try:
         print (' -- done!---')
     if args.live_capture:
         print ('')
-        print ('--- Live Capture! (press ctrl+C to break) ---')
+        if not args.live_capture_silent:
+            print ('--- Live Capture! (press ctrl+C to break) ---')
+        else:
+            print ('--- Live Capture (silent timeout message)! (press ctrl+C to break) ---')
         counter = 0
         for att in conn.live_capture():# using a generator!
             if att is None:
                 #counter += 1 #enable to implemet a poorman timeout
-                print ("timeout {}".format(counter))
+                if not args.live_capture_silent:
+                    print ("timeout {}".format(counter))
             else:
-                print ("ATT {:>6}: uid:{:>3}, user_id:{:>8} t: {}, s:{} p:{}".format(counter, att.uid, att.user_id, att.timestamp, att.status, att.punch))
+                print ("ATT {:>6}: uid:{:>3}, user_id:{:>8} t: {}, s:{} p:{} Name: {}".format(counter, att.uid, att.user_id, att.timestamp, att.status, att.punch, name_users.get(att.user_id, "---")))
             if counter >= 10:
                 conn.end_live_capture = True
         print('')
